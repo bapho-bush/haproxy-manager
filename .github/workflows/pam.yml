@@ -1,0 +1,39 @@
+name: PAM and UI regression
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pam:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ['ubuntu:24.04', 'debian:13', 'fedora:43', 'rockylinux:9']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the distribution's PAM binding
+        run: docker build --build-arg BASE='${{ matrix.base }}' -t ham-pam-test -f tools/pam-test.Dockerfile .
+      - name: Regression checks
+        run: |
+          docker run --rm -v "$PWD:/app:ro" ham-pam-test sh -c '
+            set -e
+            for test in test-pam test-access test-twofactor test-hardening test-ratelimit test-updates; do
+              python3 tools/$test.py
+            done'
+      - name: Real password and account policies, installation, restart
+        run: docker run --rm -e HAM_PAM_NATIVE_TEST=1 -v "$PWD:/app:ro" ham-pam-test python3 tools/test-pam.py --native
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: DOM runtime for the existing UI checks
+        run: npm install --prefix "$RUNNER_TEMP/ham-dom" linkedom
+      - name: All UI checks and translations
+        run: LINKEDOM="$RUNNER_TEMP/ham-dom/node_modules/linkedom/esm/index.js" NODE_OPTIONS=--experimental-default-type=module bash tools/uitests/run-all.sh

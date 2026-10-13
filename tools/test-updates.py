@@ -121,6 +121,12 @@ ok(v["latest"] == "" and v["available"] is False and v["latest_ref"] == "main",
 # ---- the update names its branch ----------------------------------------
 sh = updates._update_shell("https://x/install.sh", "beta")
 ok("--update --yes --ref beta" in sh, "the updater is told the branch")
+ok("--repo " + updates.UPDATE_REPO in sh, "the updater keeps the selected repository")
+original_repo = updates.UPDATE_REPO
+updates.UPDATE_REPO = "another-owner/another-fork"
+ok("--repo another-owner/another-fork" in updates._update_shell("https://x/install.sh", "main"),
+   "an explicit repository override is handed to the installer")
+updates.UPDATE_REPO = original_repo
 ok("'" in updates._update_shell("https://x/install.sh", "a b"), "and a ref is quoted for the shell")
 c = load_config()
 ok(updates._update_ref(None, c) == "main", "no branch asked and nothing on offer: main")
