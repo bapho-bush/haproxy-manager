@@ -270,8 +270,8 @@ def _update_ref(asked, cfg):
 
 
 def _update_shell(url, ref):
-    return ("curl -fsSL %s | bash -s -- --update --yes --ref %s >>%s 2>&1"
-            % (url, shlex.quote(ref), UPDATE_LOG))
+    return ("curl -fsSL %s | bash -s -- --update --yes --ref %s --repo %s >>%s 2>&1"
+            % (shlex.quote(url), shlex.quote(ref), shlex.quote(UPDATE_REPO), shlex.quote(str(UPDATE_LOG))))
 
 
 @app.post("/api/update")

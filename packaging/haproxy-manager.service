@@ -18,6 +18,7 @@ Environment=HAM_LISTEN=0.0.0.0
 Environment=HAM_PORT=8080
 # Anything you want to change belongs here rather than in this file, which is
 # replaced on upgrade:  systemctl edit haproxy-manager
+Environment=HAM_REPO=bapho-bush/haproxy-manager
 EnvironmentFile=-/etc/default/haproxy-manager
 ExecStart=/usr/bin/python3 /opt/haproxy-manager/app.py
 Restart=on-failure

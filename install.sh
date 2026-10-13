@@ -2,7 +2,7 @@
 #
 # haproxy-manager installer for Debian-based distributions (Debian, Ubuntu, ...).
 #
-#   curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/bapho-bush/haproxy-manager/main/install.sh | sudo bash
 #
 # or from a checkout:
 #
@@ -13,7 +13,7 @@
 # preserves config.json, issued certificates and node-local settings.
 #
 # Options (flags, or the equivalent environment variables):
-#   --repo   <owner/name>  HAM_REPO      GitHub repository        (avandeputte/haproxy-manager)
+#   --repo   <owner/name>  HAM_REPO      GitHub repository        (bapho-bush/haproxy-manager)
 #   --ref    <branch|tag>  HAM_REF       branch or tag to install (main)
 #   --port   <port>        HAM_PORT      UI/API port              (8080)
 #   --listen <address>     HAM_LISTEN    UI/API bind address      (0.0.0.0)
@@ -30,7 +30,7 @@
 set -euo pipefail
 umask 022
 
-REPO="${HAM_REPO:-avandeputte/haproxy-manager}"
+REPO="${HAM_REPO:-bapho-bush/haproxy-manager}"
 REF="${HAM_REF:-main}"
 DEST="${HAM_DEST:-/opt/haproxy-manager}"
 DATA="${HAM_DATA_DIR:-/var/lib/haproxy-manager}"
@@ -76,11 +76,11 @@ usage() {
     cat <<'EOF'
 HAProxy Cluster Manager installer (Debian-based distributions)
 
-  curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
+  curl -fsSL https://raw.githubusercontent.com/bapho-bush/haproxy-manager/main/install.sh | sudo bash
   sudo ./install.sh
 
 Options (or the equivalent environment variable):
-  --repo    <owner/name>   HAM_REPO       GitHub repository        (avandeputte/haproxy-manager)
+  --repo    <owner/name>   HAM_REPO       GitHub repository        (bapho-bush/haproxy-manager)
   --ref     <branch|tag>   HAM_REF        branch or tag            (main)
   --port    <port>         HAM_PORT       UI/API port              (8080)
   --listen  <address>      HAM_LISTEN     UI/API bind address      (0.0.0.0)
@@ -297,7 +297,7 @@ install_packages() {
     export NEEDRESTART_MODE=a          # keep Ubuntu's needrestart from prompting
     apt-get update -q
     apt-get install -y --no-install-recommends \
-        python3 python3-flask python3-requests python3-waitress \
+        python3 python3-flask python3-requests python3-waitress python3-pampy \
         haproxy keepalived \
         openssl ca-certificates curl socat iproute2 procps tar
 }
@@ -537,6 +537,11 @@ EOF
         fi
     fi
 
+    if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("local",{}).get("ui_auth",{}).get("mode") == "pam" else 1)' "$DATA/config.json" 2>/dev/null; then
+        log "PAM sign-in is enabled; keeping system authentication"
+        return 0
+    fi
+
     # -- UI login. Also covers upgrades from a version that only had an API key.
     ADMIN_USER="$(HAM_DATA_DIR="$DATA" python3 "$DEST/app.py" show-admin 2>/dev/null || true)"
     if [ -n "$ADMIN_USER" ]; then
@@ -562,6 +567,12 @@ EOF
 
 install_service() {
     log "Installing systemd service"
+    groupadd -f haproxy-manager
+    if [ ! -e /etc/pam.d/haproxy-manager ]; then
+        install -d -m 0755 /etc/pam.d
+        printf 'auth include common-auth\naccount include common-account\n' > /etc/pam.d/haproxy-manager
+        chmod 0644 /etc/pam.d/haproxy-manager
+    fi
     cat > "$UNIT" <<EOF
 [Unit]
 Description=HAProxy Cluster Manager web UI
@@ -581,6 +592,9 @@ Environment=HAM_KEEPALIVED_CFG=/etc/keepalived/keepalived.conf
 Environment=HAM_ACME_HOME=$ACME_HOME
 Environment=HAM_LISTEN=$LISTEN
 Environment=HAM_PORT=$PORT
+Environment=HAM_REPO=$REPO
+Environment=HAM_REF=$REF
+EnvironmentFile=-/etc/default/haproxy-manager
 ExecStart=/usr/bin/python3 $DEST/app.py
 Restart=on-failure
 RestartSec=3

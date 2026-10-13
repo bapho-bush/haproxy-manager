@@ -17,6 +17,8 @@ Environment=HAM_KEEPALIVED_CFG=/etc/keepalived/keepalived.conf
 Environment=HAM_ACME_HOME=/root/.acme.sh
 Environment=HAM_LISTEN=0.0.0.0
 Environment=HAM_PORT=8080
+Environment=HAM_REPO=bapho-bush/haproxy-manager
+EnvironmentFile=-/etc/default/haproxy-manager
 ExecStart=/usr/bin/python3 /opt/haproxy-manager/app.py
 Restart=on-failure
 RestartSec=3

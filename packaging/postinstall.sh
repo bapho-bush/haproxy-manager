@@ -13,6 +13,17 @@ BUNDLED_ACME=/usr/share/haproxy-manager/acme.sh
 
 install -d -m 0700 "$DATA"
 install -d -m 0700 "$CERTS"
+groupadd -f haproxy-manager
+if [ ! -e /etc/pam.d/haproxy-manager ]; then
+    if [ -f /etc/pam.d/common-auth ] && [ -f /etc/pam.d/common-account ]; then
+        printf 'auth include common-auth\naccount include common-account\n' > /etc/pam.d/haproxy-manager
+    elif [ -f /etc/pam.d/system-auth ]; then
+        printf 'auth include system-auth\naccount include system-auth\n' > /etc/pam.d/haproxy-manager
+    else
+        echo "Configure /etc/pam.d/haproxy-manager before enabling PAM sign-in." >&2
+    fi
+    [ ! -f /etc/pam.d/haproxy-manager ] || chmod 0644 /etc/pam.d/haproxy-manager
+fi
 
 # acme.sh ships inside the package, so installing needs no network. Only the
 # program files are refreshed; account keys and issued certificates are left
@@ -60,7 +71,7 @@ systemctl restart haproxy-manager >/dev/null 2>&1 || true
 
 if [ -n "${SEEDED:-}" ]; then
     ADDR="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    [ -n "$ADDR" ] || ADDR="$(hostname)"
+    [ -n "$ADDR" ] || ADDR="$(hostname 2>/dev/null || /usr/bin/python3 -c 'import socket; print(socket.gethostname())')"
     cat <<EOF
 
   HAProxy Cluster Manager is running at  http://$ADDR:8080
