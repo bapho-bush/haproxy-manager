@@ -44,6 +44,7 @@ overrides:
       - python3-requests
       - python3-waitress
       - python3-pampy
+      - python3-six  # Ubuntu's pampy 2.0.2 imports six without declaring it.
       - haproxy
       - openssl
       - curl

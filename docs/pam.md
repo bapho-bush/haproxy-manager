@@ -21,6 +21,8 @@ install the PAM binding: `python3-pampy` on Debian/Ubuntu, `python3-pam` on
 Fedora/RHEL/Rocky (EPEL is needed on Rocky/RHEL). These package names refer to
 the [python-pam](https://github.com/FirefighterBlu3/python-pam) library, imported
 as `pam`; Debian's separate `python3-pam` package is a different binding.
+The Debian/Ubuntu installation also includes `python3-six`, required by Ubuntu's
+older pampy binding even though its package does not declare that dependency.
 
 Add an **existing** user to the group using the OS or domain administration
 tools. For a local account:

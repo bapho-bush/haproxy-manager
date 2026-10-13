@@ -9,6 +9,7 @@ from datetime import date
 import json
 from http.cookies import SimpleCookie
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -285,6 +286,22 @@ class NativeTests(unittest.TestCase):
                         'c=ham.app.test_client(); '
                         'assert c.post("/api/login", json=' + repr(credentials) + ').status_code == 200; '
                         'print("PASS: PAM login after process restart")'], check=True)
+
+    def test_native_pam_upgrade_does_not_seed_admin(self):
+        directory = Path(_tmp.name) / "upgrade"
+        directory.mkdir()
+        config = {"local": {"ui_auth": POLICY, "api_key": "upgrade-test-key"}}
+        path = directory / "config.json"
+        path.write_text(json.dumps(config))
+        script = Path("install.sh").read_text()
+        self.assertTrue(script.rstrip().endswith('main "$@"'))
+        script = script.rsplit('main "$@"', 1)[0]  # Load the actual functions without running main.
+        script += '\nDATA=' + shlex.quote(str(directory)) + '\nDEST=/app\n'
+        script += "ip(){ echo 'a b c d e f 127.0.0.1'; }\nseed_credentials\nsummary\n"
+        result = subprocess.run(["bash"], input=script, text=True, capture_output=True, check=True)
+        self.assertIn("Sign in with a system account", result.stdout)
+        self.assertNotIn("create one on first visit", result.stderr)
+        self.assertEqual(json.loads(path.read_text()), config)
 
 
 if __name__ == "__main__":

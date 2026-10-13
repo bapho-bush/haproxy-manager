@@ -297,7 +297,7 @@ install_packages() {
     export NEEDRESTART_MODE=a          # keep Ubuntu's needrestart from prompting
     apt-get update -q
     apt-get install -y --no-install-recommends \
-        python3 python3-flask python3-requests python3-waitress python3-pampy \
+        python3 python3-flask python3-requests python3-waitress python3-pampy python3-six \
         haproxy keepalived \
         openssl ca-certificates curl socat iproute2 procps tar
 }
@@ -510,7 +510,7 @@ EOF
 }
 
 seed_credentials() {
-    API_KEY=""; HAD_KEY=0; ADMIN_PW=""; ADMIN_USER=""
+    API_KEY=""; HAD_KEY=0; ADMIN_PW=""; ADMIN_USER=""; PAM_ENABLED=0
 
     # -- API key: for the peer and for scripted API access, not for people.
     #    Only ever seeded on a fresh install; an existing one is left alone.
@@ -538,6 +538,7 @@ EOF
     fi
 
     if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("local",{}).get("ui_auth",{}).get("mode") == "pam" else 1)' "$DATA/config.json" 2>/dev/null; then
+        PAM_ENABLED=1
         log "PAM sign-in is enabled; keeping system authentication"
         return 0
     fi
@@ -636,7 +637,9 @@ summary() {
     echo
     printf '%s>> HAProxy Cluster Manager is running at http://%s:%s%s\n' "$C_B" "$ip" "$PORT" "$C_0"
     echo
-    if [ -n "${ADMIN_PW:-}" ]; then
+    if [ "${PAM_ENABLED:-0}" = "1" ]; then
+        echo "   Sign in with a system account in the configured PAM access group."
+    elif [ -n "${ADMIN_PW:-}" ]; then
         printf '   Sign in with   username %s%s%s\n' "$C_B" "${ADMIN_USER:-admin}" "$C_0"
         printf '                  password %s%s%s\n' "$C_B" "$ADMIN_PW" "$C_0"
         echo "   Also saved at $DATA/admin-credentials.txt -- change it under System > Administrator login."

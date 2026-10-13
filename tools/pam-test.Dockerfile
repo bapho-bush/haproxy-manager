@@ -2,7 +2,7 @@ ARG BASE=ubuntu:24.04
 FROM ${BASE}
 RUN if command -v apt-get >/dev/null; then \
       apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        python3 python3-flask python3-requests python3-waitress python3-pampy \
+        python3 python3-flask python3-requests python3-waitress python3-pampy python3-six \
         libpam-modules libpam-runtime passwd ca-certificates; \
     else \
       if grep -q 'ID="rocky"' /etc/os-release; then dnf -y install epel-release; fi; \
