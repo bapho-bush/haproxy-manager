@@ -23,7 +23,7 @@ export function showLogin(setup){
   $("#logintitle").textContent=s?t("Create an administrator"):t("Sign in");
   $("#loginintro").textContent=s
     ? t("This node has no administrator yet. Choose the credentials you will use to sign in.")
-    : t("haproxy-manager on {host}",{host:location.host});
+    : (state.who.auth_mode==="pam"?t("Sign in with your system username and password."):t("haproxy-manager on {host}",{host:location.host}));
   $("#lp2wrap").hidden=!s;
   $("#lp").autocomplete=s?"new-password":"current-password";
   $("#lbtn").textContent=s?t("Create and sign in"):t("Sign in");
@@ -104,6 +104,7 @@ async function disableTwoFactor(){
    password is something you do from wherever you happen to be. */
 export function openAccount(){
   const body=document.createElement("div");body.className="frm";
+  const pam=state.who.auth_mode==="pam";
   const fields=[
     {k:"username",l:"Username",t:"text"},
     {k:"email",l:"Email",t:"text",h:"Optional. Offered as the default for ACME accounts and notifications."},
@@ -120,7 +121,8 @@ export function openAccount(){
      accident you find out about during a failover. Only shown when there is
      somewhere to send it. */
   const peers=state.who.peers||0;
-  if(peers)fields.push({k:"propagate",l:"Apply to the other nodes",t:"bool",d:true,
+  if(pam)fields.splice(3);
+  if(peers&&!pam)fields.push({k:"propagate",l:"Apply to the other nodes",t:"bool",d:true,
     h:tn(peers,"Sends the new login to the {n} other node. Only the stored hash travels, never the password.",
                "Sends the new login to the {n} other nodes. Only the stored hash travels, never the password.")});
   fields.forEach(f=>fieldRow(f,f.k==="username"?(state.who.username||state.who.admin_username)
@@ -128,9 +130,16 @@ export function openAccount(){
                              :f.k==="theme"?currentTheme()
                              :f.k==="propagate"?true:"")
                  .forEach(el=>body.appendChild(el)));
+  if(pam){
+    body.querySelector("#f_username").readOnly=true;
+    const note=document.createElement("p");note.className="hint";
+    note.textContent=t("PAM account: manage your username and password in the operating system.");
+    body.appendChild(note);
+  }
   const err=document.createElement("div");err.className="err";
   const out=document.createElement("div");out.className="hint";out.style.marginTop="10px";
   /* The second factor: a state and one action, not a form. */
+  if(!pam){
   const tfLab=document.createElement("label");tfLab.className="fl";tfLab.textContent=t("Two-factor");
   const tfCell=document.createElement("div");
   const on=!!state.who.totp_enabled;
@@ -145,6 +154,7 @@ export function openAccount(){
     :t("Ask for a six-digit code from an authenticator app at every sign-in.");
   tfCell.appendChild(tfHint);
   body.appendChild(tfLab);body.appendChild(tfCell);
+  }
   body.appendChild(out);
   /* Applied as it is chosen: an appearance you cannot see until you save is a
      guess. Choosing and then closing without saving puts it back. */
@@ -163,7 +173,7 @@ export function openAccount(){
       if(nw&&!val("current")){err.textContent=t("Enter the current password to change it.");return;}
       const box=fieldEl("propagate");
       try{
-        const r=await api("password","POST",{username:val("username").trim(),email:val("email").trim(),
+        const r=await api("password","POST",pam?{email:val("email").trim(),theme:val("theme")}:{username:val("username").trim(),email:val("email").trim(),
                                      current:val("current"),new:nw,
                                      theme:val("theme"),
                                      propagate:!!(box&&box.checked)});
@@ -198,7 +208,7 @@ export async function refreshWho(){
     g.onclick=openAccount;
     const b=document.createElement("button");b.className="lo";b.textContent=t("Sign out");
     b.onclick=async()=>{try{await api("logout","POST",{});}catch(e){}
-      state.who={authenticated:false,needs_setup:false,username:"",admin_username:state.who.admin_username};
+      state.who={authenticated:false,needs_setup:false,username:"",admin_username:state.who.admin_username,auth_mode:state.who.auth_mode};
       showLogin(false);};
     /* name and gear share a row; Sign out keeps the full width below it */
     const row=document.createElement("div");row.className="whorow";

@@ -2,6 +2,79 @@ import { $, api, btn, esc, fieldRow, readForm } from "../core.js";
 import { t, tn } from "../i18n.js";
 import { refreshStatus } from "../shell.js";
 import { CERT_MODE_LABEL } from "../pages/services.js";
+import { refreshWho } from "../auth.js";
+import { state } from "../state.js";
+
+async function renderAuthentication(container){
+  const cur=await api("ui-auth");
+  const card=document.createElement("div");card.className="card";
+  card.innerHTML='<div class=hd><h2>'+t("Panel sign-in")+'</h2></div>';
+  const bd=document.createElement("div");bd.className="bd";
+  const intro=document.createElement("p");intro.className="hint";
+  intro.textContent=t("PAM admits members of a system group as panel administrators. Users and Groups under SIGN-IN protect published services. Manage system accounts and group membership in the OS. Use HTTPS before entering system passwords.");
+  bd.appendChild(intro);
+  const fields=[
+    {k:"auth_mode",l:"Authentication",t:"select",o:[{value:"local",label:"Local administrator"},{value:"pam",label:"System account (PAM)"}]},
+    {k:"pam_service",l:"PAM service",t:"text"},
+    {k:"allowed_group",l:"Allowed system group",t:"text"},
+    {k:"auth_current_password",l:"Your current password",t:"password"},
+    {k:"auth_current_code",l:"Current second-factor code (if enabled)",t:"text"},
+    {k:"auth_target_username",l:"Username to test and sign in as",t:"text"},
+    {k:"auth_target_password",l:"Password for the tested account",t:"password"},
+    {k:"auth_target_code",l:"Target second-factor code (if enabled)",t:"text"},
+  ];
+  const frm=document.createElement("div");frm.className="frm";
+  const rows={};
+  fields.forEach(f=>{
+    const value=f.k==="auth_mode"?cur.mode:f.k==="auth_target_username"?state.who.username:cur[f.k];
+    rows[f.k]=fieldRow(f,value);rows[f.k].forEach(el=>frm.appendChild(el));
+  });
+  bd.appendChild(frm);
+  const val=k=>frm.querySelector("#f_"+k).value;
+  ["auth_current_password","auth_target_password"].forEach(k=>{frm.querySelector("#f_"+k).autocomplete="current-password";});
+  ["auth_current_code","auth_target_code"].forEach(k=>{frm.querySelector("#f_"+k).autocomplete="one-time-code";});
+  const sync=()=>{
+    rows.auth_current_code.forEach(el=>{el.hidden=!state.who.totp_enabled;});
+    rows.auth_target_code.forEach(el=>{el.hidden=val("auth_mode")!=="local";});
+  };
+  frm.querySelector("#f_auth_mode").addEventListener("change",sync);sync();
+  const status=document.createElement("p");status.className="hint";
+  status.textContent=(cur.ready?t("PAM is ready."):(cur.errors||[]).join("; "))+" "+
+    t("Enumerated group members: ")+(cur.members||[]).join(", ")+". "+cur.members_note;
+  bd.appendChild(status);
+  const lookup=document.createElement("div");lookup.className="frm";
+  const [label,cell]=fieldRow({k:"auth_lookup",l:"Username to check",t:"text"},"");
+  const user=cell.querySelector("input");lookup.appendChild(label);lookup.appendChild(cell);
+  const actions=document.createElement("div");actions.style.marginTop="8px";
+  const result=document.createElement("span");result.className="hint";
+  result.setAttribute("role","status");
+  actions.appendChild(btn(t("Check group membership"),"sm",async()=>{
+    try{
+      const r=await api("ui-auth?username="+encodeURIComponent(user.value.trim()));
+      result.textContent=r.lookup.username+": "+(r.lookup.member?t("member"):t("not a member"));
+    }catch(e){result.textContent=e.message;}
+  }));
+  actions.appendChild(result);cell.appendChild(actions);bd.appendChild(lookup);
+  const msg=document.createElement("p");msg.className="hint";msg.setAttribute("role","status");
+  const save=btn(t("Verify and change sign-in"),"pri",async()=>{
+    save.disabled=true;msg.textContent=t("Checking credentials...");
+    try{
+      await api("ui-auth","PUT",{mode:val("auth_mode"),pam_service:val("pam_service").trim(),allowed_group:val("allowed_group").trim(),
+        current:{username:state.who.username,password:val("auth_current_password"),code:val("auth_current_code")},
+        target:{username:val("auth_target_username").trim(),password:val("auth_target_password"),code:val("auth_target_code")}});
+      await refreshWho();await renderWebui();
+    }catch(e){msg.textContent=e.message;}
+    finally{
+      frm.querySelector("#f_auth_current_password").value="";
+      frm.querySelector("#f_auth_target_password").value="";
+      frm.querySelector("#f_auth_current_code").value="";
+      frm.querySelector("#f_auth_target_code").value="";
+      save.disabled=false;
+    }
+  });
+  save.style.marginTop="16px";
+  bd.appendChild(save);bd.appendChild(msg);card.appendChild(bd);container.appendChild(card);
+}
 
 /* ---- HTTPS for this UI ---- */
 export const WEBUI_FIELDS=[
@@ -142,4 +215,5 @@ export async function renderWebui(){
     bd.appendChild(w);
   }
   card.appendChild(bd);c.appendChild(card);
+  await renderAuthentication(c);
 }

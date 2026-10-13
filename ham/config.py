@@ -137,6 +137,9 @@ DEFAULT_CONFIG = {
                   "iterations": 0, "updated": ""},
         "session_secret": "",      # HMAC key for session cookies; rotating it logs everyone out
         "session_hours": 12,
+        "ui_auth": {"mode": "local", "pam_service": "haproxy-manager",
+                    "allowed_group": "haproxy-manager"},
+        "pam_profiles": {},       # Preferences only; credentials remain in the OS.
         # Whether the daily version check also reads the beta branch. Per
         # node: it is a choice about this node, and an update started here
         # carries its branch to the other nodes anyway.

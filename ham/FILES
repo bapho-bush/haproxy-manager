@@ -3,6 +3,7 @@ access.py
 acme.py
 apply.py
 auth.py
+pam_auth.py
 backup.py
 base.py
 cluster.py

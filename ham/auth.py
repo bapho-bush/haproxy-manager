@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timezone
 from flask import jsonify
 from flask import request
+from flask import g
 import base64
 import hashlib
 import hmac
@@ -15,7 +16,7 @@ import time
 from .base import PORT, VERSION, _lock, app, log
 from .config import load_config, save_config
 from .util import run
-from . import sync, twofactor, vrrp
+from . import pam_auth, sync, twofactor, vrrp
 
 # --------------------------------------------------------------------------
 # authentication: interactive login for people, API key for the peer/scripts
@@ -51,13 +52,15 @@ def bad_username(username):
     401 loop repairable only through the API key. Control characters have no
     business in a login name either.
     """
-    username = (username or "").strip()
+    if not isinstance(username, str):
+        return "a username must be a string"
+    if "|" in username or any(ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f for c in username):
+        return "the username cannot contain '|' or control characters"
+    username = username.strip()
     if not username:
         return "a username is required"
     if len(username) > 64:
         return "the username is too long"
-    if "|" in username or any(ord(c) < 0x20 for c in username):
-        return "the username cannot contain '|' or control characters"
     return ""
 
 
@@ -106,7 +109,7 @@ def needs_setup(cfg):
     already-set-up, so setup refuses and the broken file can be repaired
     rather than silently replaced.
     """
-    if (cfg.get("_meta") or {}).get("unreadable"):
+    if (cfg.get("_meta") or {}).get("unreadable") or pam_auth.settings(cfg)["mode"] != "local":
         return False
     return not (cfg["local"].get("admin") or {}).get("hash")
 
@@ -146,6 +149,11 @@ def read_session(cfg, token):
             return None
     except ValueError:
         return None
+    mode = pam_auth.settings(cfg)["mode"]
+    if bad_username(username) or mode not in ("local", "pam"):
+        return None
+    if mode == "pam" and pam_auth.member(username, pam_auth.settings(cfg)["allowed_group"]) != username:
+        return None
     return {"user": username, "unlocked": unlocked}
 
 
@@ -178,6 +186,7 @@ LOCAL_WRITE_PREFIXES = (
     "/api/update", "/api/version", "/api/apply", "/api/sync/receive", "/api/setup",
     "/api/admin",          # the administrator record, pushed from another node
     "/api/webui",          # this node's own UI address, not shared
+    "/api/ui-auth",        # this node's authentication policy, not shared
     "/api/unlock",         # lifting the lock cannot itself be blocked by it
 )
 
@@ -213,7 +222,7 @@ def _audit(resp):
     if request.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE", "PATCH"):
         if request.path not in ("/api/login", "/api/whoami"):
             try:
-                who = current_user() or ("api-key" if request.headers.get("X-API-Key") else "anonymous")
+                who = getattr(g, "audit_user", None) or current_user() or ("api-key" if request.headers.get("X-API-Key") else "anonymous")
             except Exception:
                 who = "?"
             what = ""
@@ -249,6 +258,8 @@ def _auth():
         return  # enforced inside the handler (always requires the API key)
 
     cfg = load_config()
+    if pam_auth.settings(cfg)["mode"] != "local" and request.path.startswith("/api/2fa/"):
+        return jsonify({"ok": False, "error": "local two-factor settings are unavailable in PAM mode"}), 403
     if needs_setup(cfg) and not cfg["local"].get("api_key"):
         # First run. Only the calls that create the administrator are open;
         # everything else stays shut, so a node waiting to be set up does not
@@ -259,7 +270,8 @@ def _auth():
                         "This node has no administrator yet. Open it in a browser and create "
                         "one; until then only setup is available."}), 401
 
-    authorised = bool(current_user(cfg))
+    g.audit_user = current_user(cfg)
+    authorised = bool(g.audit_user)
     if not authorised:
         authorised = key_matches(cfg["local"].get("api_key"), request.headers.get("X-API-Key"))
     if not authorised:
@@ -310,17 +322,22 @@ def api_whoami():
         # Unauthenticated: only what the sign-in screen has to know. The
         # administrator's name, the hostname and the version are not for
         # anyone who can merely reach the port.
-        return jsonify({"authenticated": False, "needs_setup": needs_setup(cfg)})
+        return jsonify({"authenticated": False, "needs_setup": needs_setup(cfg),
+                        "auth_mode": pam_auth.settings(cfg)["mode"]})
+    is_pam = pam_auth.settings(cfg)["mode"] == "pam"
+    profile = ((cfg["local"].get("pam_profiles") or {}).get(user) or {}) if is_pam \
+        else (cfg["local"].get("admin") or {})
     return jsonify({
         "authenticated": True,
         "username": user,
-        "email": (cfg["local"].get("admin") or {}).get("email", ""),
-        "theme": (cfg["local"].get("admin") or {}).get("theme", "system"),
-        "totp_enabled": twofactor.enabled(cfg["local"].get("admin") or {}),
+        "auth_mode": pam_auth.settings(cfg)["mode"],
+        "email": profile.get("email", ""),
+        "theme": profile.get("theme", "system"),
+        "totp_enabled": not is_pam and twofactor.enabled(profile),
         "version": VERSION,
         "hostname": socket.gethostname(),
         "needs_setup": False,
-        "admin_username": (cfg["local"].get("admin") or {}).get("username", "admin"),
+        "admin_username": "" if is_pam else profile.get("username", "admin"),
         # How many other nodes there are, so the account dialog knows whether
         # offering to copy the login anywhere makes sense.
         "peers": len(sync.enabled_peers(cfg)),
@@ -337,6 +354,9 @@ def _prune_login_fails():
 
 
 def _login_ok(cfg, username, resp_body):
+    recovery = getattr(g, "recovery_used", None)
+    if recovery:
+        log.warning("a recovery code was used to sign in as %s; %d remain", *recovery)
     resp = jsonify(resp_body)
     resp.set_cookie(
         SESSION_COOKIE, make_session(cfg, username),
@@ -352,12 +372,12 @@ def api_setup():
     cfg = load_config()
     if not needs_setup(cfg):
         return jsonify({"ok": False, "error": "an administrator already exists"}), 409
-    body = request.get_json(force=True) or {}
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
-    bad = bad_username(username)
+    body = request.get_json(force=True)
+    bad = credential_error(body)
     if bad:
         return jsonify({"ok": False, "error": bad}), 400
+    username = body["username"].strip()
+    password = body["password"]
     if len(password) < 8:
         return jsonify({"ok": False, "error": "the password must be at least 8 characters"}), 400
     with _lock:
@@ -369,74 +389,151 @@ def api_setup():
     return _login_ok(cfg, username, {"ok": True, "username": username})
 
 
-@app.post("/api/login")
-def api_login():
-    cfg = load_config()
-    ip = request.remote_addr or "?"
-    fails, until = _login_fails.get(ip, [0, 0])
+def credential_error(body):
+    if not isinstance(body, dict):
+        return "credentials must be an object"
+    username, password = body.get("username"), body.get("password")
+    if bad_username(username):
+        return bad_username(username)
+    if not isinstance(password, str) or not password or "\x00" in password:
+        return "a non-empty password without NUL is required"
+    if not isinstance(body.get("code", ""), str):
+        return "the second-factor code must be a string"
+    try:
+        username.encode("utf-8")
+        password.encode("utf-8")
+    except UnicodeError:
+        return "credentials must be valid UTF-8"
+    return ""
+
+
+def credential_user(cfg, body, policy):
+    """Verify in the config lock; consume TOTP in memory, save only on success."""
+    if credential_error(body):
+        return None, False
+    username = body["username"].strip()
+    if policy["mode"] == "pam":
+        user = pam_auth.authenticate(username, body["password"], policy)
+        return (user if user and not bad_username(user) else None), False
+    if policy["mode"] != "local":
+        return None, False
+    admin = cfg["local"].get("admin") or {}
+    if not hmac.compare_digest(username.encode(), admin.get("username", "").encode()) or \
+            not verify_password(body["password"], admin):
+        return None, False
+    if twofactor.enabled(admin):
+        code = body.get("code", "").strip()
+        if not code:
+            return None, True
+        counter = twofactor.verify_totp(admin.get("totp_secret"), code,
+                                       last_counter=int(admin.get("totp_last") or 0))
+        if counter is not None:
+            admin["totp_last"] = counter
+        elif twofactor.use_recovery(admin, code):
+            g.recovery_used = (username, len(admin.get("totp_recovery") or []))
+        else:
+            return None, False
+    return username, False
+
+
+def login_limit():
+    _, until = _login_fails.get(request.remote_addr or "?", [0, 0])
     if until > time.time():
         return jsonify({"ok": False, "error": "too many failed attempts -- try again in %d seconds"
-                                              % int(until - time.time())}), 429
+                                               % int(until - time.time())}), 429
 
-    body = request.get_json(force=True) or {}
-    admin = cfg["local"].get("admin") or {}
-    username = (body.get("username") or "").strip()
-    ok = (hmac.compare_digest(username.encode(), admin.get("username", "").encode()) and
-          verify_password(body.get("password") or "", admin))
 
-    def failed(message, status=401):
-        nonlocal fails
-        fails += 1
-        if fails >= LOGIN_MAX_FAILS:
-            _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS]   # locked; counter restarts
-        else:
-            _login_fails[ip] = [fails, 0]
-        _prune_login_fails()
-        log.warning("failed sign-in for %r from %s (%d in a row)", username, ip, fails)
-        time.sleep(0.5)  # blunt the rate of online guessing
-        return jsonify({"ok": False, "error": message}), status
+def login_failed(username, status=401):
+    ip = request.remote_addr or "?"
+    fails, _ = _login_fails.get(ip, [0, 0])
+    fails += 1
+    _login_fails[ip] = [0, time.time() + LOGIN_LOCK_SECONDS] if fails >= LOGIN_MAX_FAILS else [fails, 0]
+    _prune_login_fails()
+    log.warning("failed sign-in for %r from %s (%d in a row)", username, ip, fails)
+    time.sleep(0.5)
+    return jsonify({"ok": False, "error": "invalid username, password or access permission"}), status
 
-    if not ok:
-        return failed("invalid username or password")
 
-    # The second factor, for accounts that carry one. The password was right,
-    # so asking for the code is not a failure -- and does not count as one.
-    if twofactor.enabled(admin):
-        code = (body.get("code") or "").strip()
-        if not code:
-            return jsonify({"ok": False, "totp_required": True,
-                            "error": "enter the six-digit code from your "
-                                     "authenticator app"}), 401
-        # Verify the code and consume it in one held lock, against the counter
-        # and recovery list read inside that lock. Checking a lock-free copy
-        # and storing the result later left a window where two logins racing
-        # with the same shoulder-surfed code both read the old counter, both
-        # passed the replay check, and both got in -- and two concurrent
-        # recovery-code uses could burn the same code twice.
-        accepted = False
-        recovery_left = None
-        with _lock:
-            cur = load_config()
-            cur_admin = cur["local"].setdefault("admin", {})
-            counter = twofactor.verify_totp(cur_admin.get("totp_secret"), code,
-                                            last_counter=int(cur_admin.get("totp_last") or 0))
-            if counter is not None:
-                cur_admin["totp_last"] = counter
-                save_config(cur)
-                accepted = True
-            elif twofactor.use_recovery(cur_admin, code):
-                save_config(cur)
-                accepted = True
-                recovery_left = len(cur_admin.get("totp_recovery") or [])
-        if recovery_left is not None:
-            log.warning("a recovery code was used to sign in as %s; %d remain%s",
-                        username, recovery_left, "" if recovery_left != 1 else "s")
-        if not accepted:
-            return failed("that code is not right, or was already used")
+def code_required():
+    return jsonify({"ok": False, "totp_required": True,
+                    "error": "enter the code from your authenticator app"}), 401
 
-    _login_fails.pop(ip, None)
-    log.info("signed in: %s from %s", username, ip)
-    return _login_ok(cfg, username, {"ok": True, "username": username})
+
+@app.post("/api/login")
+def api_login():
+    limited = login_limit()
+    if limited:
+        return limited
+    body = request.get_json(force=True)
+    bad = credential_error(body)
+    if bad:
+        return jsonify({"ok": False, "error": bad}), 400
+    # ponytail: serialize credential transitions with config writes; move slow PAM
+    # checks outside the lock with a policy revision check if contention matters.
+    with _lock:
+        cfg = load_config()
+        policy = pam_auth.settings(cfg)
+        user, required = credential_user(cfg, body, policy)
+        if user:
+            if policy["mode"] == "local" and twofactor.enabled(cfg["local"].get("admin") or {}):
+                save_config(cfg)
+            _login_fails.pop(request.remote_addr or "?", None)
+            log.info("signed in: %s from %s", user, request.remote_addr)
+            return _login_ok(cfg, user, {"ok": True, "username": user})
+    return code_required() if required else login_failed(body["username"])
+
+
+@app.route("/api/ui-auth", methods=["GET", "PUT"])
+def api_ui_auth():
+    cfg = load_config()
+    if request.method == "GET":
+        policy = pam_auth.settings(cfg)
+        result = dict(policy, **pam_auth.diagnostics(policy))
+        username = request.args.get("username")
+        if username is not None:
+            if bad_username(username):
+                return jsonify({"ok": False, "error": bad_username(username)}), 400
+            user = pam_auth.member(username.strip(), policy["allowed_group"])
+            result["lookup"] = {"username": user or username, "member": bool(user)}
+        return jsonify(result)
+    if not current_user(cfg):
+        return jsonify({"ok": False, "error": "a signed-in session is required"}), 401
+    limited = login_limit()
+    if limited:
+        return limited
+    body = request.get_json(force=True)
+    try:
+        proposed = pam_auth.validate(body)
+        for key in ("current", "target"):
+            bad = credential_error(body.get(key))
+            if bad:
+                raise ValueError(key + ": " + bad)
+        if proposed["mode"] == "pam":
+            state = pam_auth.diagnostics(proposed)
+            if not state["ready"]:
+                raise ValueError("; ".join(state["errors"]))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    with _lock:
+        cfg = load_config()
+        actor = current_user(cfg)
+        if not actor:
+            return jsonify({"ok": False, "error": "sign in again"}), 401
+        policy = pam_auth.settings(cfg)
+        current, required = credential_user(cfg, body["current"], policy)
+        if current and current == actor:
+            if proposed == policy and body["current"] == body["target"]:
+                target = current
+            else:
+                target, required = credential_user(cfg, body["target"], proposed)
+            if target:
+                cfg["local"]["ui_auth"] = proposed
+                cfg["local"]["session_secret"] = os.urandom(32).hex()
+                save_config(cfg)
+                _login_fails.pop(request.remote_addr or "?", None)
+                log.info("%s changed UI authentication to %s from %s", actor, proposed["mode"], request.remote_addr)
+                return _login_ok(cfg, target, {"ok": True, "username": target, "auth_mode": proposed["mode"]})
+    return code_required() if required else login_failed(body["current"]["username"], status=403)
 
 
 @app.post("/api/unlock")
@@ -526,6 +623,11 @@ def api_password():
     if not user:
         return jsonify({"ok": False, "error": "log in first"}), 401
     body = request.get_json(force=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "the profile must be an object"}), 400
+    is_pam = pam_auth.settings(cfg)["mode"] == "pam"
+    if is_pam and any(k not in ("email", "theme") for k in body):
+        return jsonify({"ok": False, "error": "system credentials are managed in the OS; only email and theme can be saved"}), 400
     admin = cfg["local"].get("admin") or {}
     new = body.get("new") or ""
     wants_name = (body.get("username") or admin.get("username") or "admin").strip() \
@@ -550,6 +652,19 @@ def api_password():
         email = str(email).strip()
         if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             return jsonify({"ok": False, "error": "that does not look like an email address"}), 400
+    if is_pam:
+        with _lock:
+            cfg = load_config()
+            if pam_auth.settings(cfg)["mode"] != "pam" or current_user(cfg) != user:
+                return jsonify({"ok": False, "error": "sign in again"}), 401
+            profile = cfg["local"].setdefault("pam_profiles", {}).setdefault(user, {})
+            if email is not None:
+                profile["email"] = email
+            if theme is not None:
+                profile["theme"] = theme
+            save_config(cfg)
+        return jsonify({"ok": True, "username": user,
+                        "email": profile.get("email", ""), "theme": profile.get("theme", "system")})
     if new and len(new) < 8:
         return jsonify({"ok": False, "error": "the new password must be at least 8 characters"}), 400
     username = (body.get("username") or admin.get("username") or "admin").strip()
