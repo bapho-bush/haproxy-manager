@@ -522,7 +522,8 @@ def api_ui_auth():
         policy = pam_auth.settings(cfg)
         current, required = credential_user(cfg, body["current"], policy)
         if current and current == actor:
-            if proposed == policy and body["current"] == body["target"]:
+            if body["current"] == body["target"] and \
+                    (proposed == policy or proposed["mode"] == policy["mode"] == "local"):
                 target = current
             else:
                 target, required = credential_user(cfg, body["target"], proposed)

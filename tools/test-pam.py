@@ -141,8 +141,14 @@ class PamTests(unittest.TestCase):
         state = self.client.get("/api/ui-auth?username=alias@domain").get_json()
         self.assertTrue(state["lookup"]["member"] is False)  # Default group differs.
         before = load_config()
-        self.assertEqual(self.switch(policy=dict(POLICY, allowed_group="missing")).status_code, 400)
-        self.assertEqual(load_config(), before)
+        for policy in (dict(POLICY, allowed_group="missing"), dict(POLICY, mode="unknown"),
+                       dict(POLICY, pam_service="../login"), dict(POLICY, pam_service="absent-service"),
+                       dict(POLICY, allowed_group="bad\0group")):
+            self.assertEqual(self.switch(policy=policy).status_code, 400)
+            self.assertEqual(load_config(), before)
+        with patch.dict(sys.modules, {"pam": None}):
+            self.assertEqual(self.switch().status_code, 400)
+            self.assertEqual(load_config(), before)
         self.switch()
         state = self.client.get("/api/ui-auth?username=alias@domain").get_json()
         self.assertEqual(state["lookup"], {"username": "alice@domain", "member": True})
@@ -161,6 +167,9 @@ class PamTests(unittest.TestCase):
         self.assertEqual(other.put("/api/ui-auth", headers={"X-API-Key": "test-api-key"},
                                   json=dict(POLICY, current=ADMIN, target=ALICE)).status_code, 401)
         self.enable()
+        before = load_config()
+        self.assertEqual(self.switch(current=BOB).status_code, 403)
+        self.assertEqual(load_config(), before)
         self.assertEqual(other.get("/api/local", headers={"X-API-Key": "test-api-key"}).status_code, 200)
 
     def test_typed_credentials_and_rate_limit(self):
@@ -203,6 +212,8 @@ class PamTests(unittest.TestCase):
             self.assertEqual(self.login(dict(ADMIN, code=plain[0])).status_code, 200)
         self.assertTrue(any("a recovery code was used" in line for line in audit.output))
         self.assertFalse(any(ADMIN["password"] in line or plain[0] in line for line in audit.output))
+        proof = dict(ADMIN, code=plain[7])
+        self.assertEqual(self.switch(LOCAL, proof, proof).status_code, 200)
         before = load_config()
         self.assertEqual(self.switch(current=dict(ADMIN, code=plain[1]), target=dict(ALICE, password="bad")).status_code, 403)
         self.assertEqual(load_config(), before)  # Even the recovery code was not consumed.
