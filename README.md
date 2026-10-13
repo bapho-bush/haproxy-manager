@@ -1,6 +1,8 @@
 <!-- docs-site:skip -->
 <img src="static/logo.svg" alt="HAProxy Cluster Manager" width="268" height="64">
 
+This fork adds PAM sign-in for the management panel. See [PAM setup and recovery](docs/pam.md). The documentation below describes the upstream features.
+
 > **📖 Documentation: [ham.iothing.net/docs](https://ham.iothing.net/docs/)** — the complete guide: every feature, every setting, and why it works the way it does.
 <!-- /docs-site:skip -->
 
@@ -19,19 +21,19 @@ copying it across.
 
 ```bash
 # from a package: .deb and .rpm on every release (Debian, Ubuntu, RHEL, Fedora)
-sudo apt-get install -y ./haproxy-manager_1.97.0_all.deb
+sudo apt-get install -y ./haproxy-manager_1.98.0_all.deb
 
 # or the install script, on any Debian-based server
-curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/bapho-bush/haproxy-manager/main/install.sh | sudo bash
 
 # or in Docker (linux/amd64 and linux/arm64)
 docker run -d --network host --cap-add NET_ADMIN --cap-add NET_BROADCAST --cap-add NET_RAW \
   -v ham-data:/var/lib/haproxy-manager -v ham-acme:/var/lib/acme.sh \
   -v ham-haproxy:/etc/haproxy -v ham-keepalived:/etc/keepalived \
-  ghcr.io/avandeputte/haproxy-manager:latest
+  ghcr.io/bapho-bush/haproxy-manager:latest
 
 # or as a Proxmox VE LXC, from the Proxmox host (community-scripts engine)
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/proxmox/ct/haproxy-manager.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/bapho-bush/haproxy-manager/main/proxmox/ct/haproxy-manager.sh)"
 ```
 
 Then open `http://<node>:8080`.
@@ -55,7 +57,7 @@ still checked against this code.
 Debian-based distributions (Debian 12/13, Ubuntu 22.04/24.04), on **every** node:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/avandeputte/haproxy-manager/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/bapho-bush/haproxy-manager/main/install.sh | sudo bash
 ```
 
 From a checkout, `sudo ./install.sh` installs those files instead of
@@ -84,7 +86,7 @@ Multi-architecture images (**linux/amd64** and **linux/arm64**) are published to
 the GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/avandeputte/haproxy-manager:latest   # or :1.46 to pin
+docker pull ghcr.io/bapho-bush/haproxy-manager:latest   # or :1.46 to pin
 docker compose up -d                                     # on every node
 ```
 
