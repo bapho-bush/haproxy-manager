@@ -42,7 +42,8 @@ assert(document.querySelector("#content").textContent.includes("Panel sign-in"),
 assert(document.querySelector("#content").textContent.includes("alice"), "group overview lists enumerated users");
 field("auth_current_password").value="current-test";
 field("auth_target_password").value="target-test";
-const save=[...document.querySelectorAll("#content button")].find(b=>b.textContent==="Verify and change sign-in");
+const save=[...document.querySelectorAll("#content .card")].find(c=>c.textContent.includes("Panel sign-in"))
+  .querySelector("button.pri");
 await click(save);
 assert(sent.mode==="pam" && sent.allowed_group==="ops" && sent.current.username==="alice" && sent.target.username==="alice",
        "switch submits current and target proof with the selected policy");

@@ -38,7 +38,7 @@ sign-in**. Choose **System account (PAM)**, service `haproxy-manager` and the
 allowed group. Enter the current administrator's password (and TOTP/recovery
 code if enabled), then the system account's username and password to test.
 
-**Verify and change sign-in** validates both accounts before saving. Success
+**Save** validates both accounts before saving. Success
 ends every old session and signs this browser in as the tested system user.
 Failure leaves the configuration, local TOTP state and session secret intact.
 Reauthentication failures count toward the existing login rate limit.
@@ -146,7 +146,7 @@ paths and `HAM_DATA_DIR` if your installation uses a different data directory.
 ## Fork updates and validation
 
 This fork defaults installation and update checks to
-`bapho-bush/haproxy-manager`, with version `1.98.0`. `HAM_REPO` and `HAM_REF`
+`bapho-bush/haproxy-manager`, with version `1.98.1`. `HAM_REPO` and `HAM_REF`
 remain explicit overrides. Service units read `/etc/default/haproxy-manager`;
 the updater passes the selected repository and branch to the installer. Updates
 retain PAM mode, system stack customizations and profiles.

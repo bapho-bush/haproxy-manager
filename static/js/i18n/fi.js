@@ -1203,7 +1203,6 @@ export default {
 "Check group membership": "Tarkista ryhmäjäsenyys",
 "member": "jäsen",
 "not a member": "ei jäsen",
-"Verify and change sign-in": "Tarkista ja muuta kirjautumistapaa",
 "Checking credentials...": "Tarkistetaan tunnistetietoja...",
 "Authentication": "Todennus",
 "Local administrator": "Paikallinen ylläpitäjä",

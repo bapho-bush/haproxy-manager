@@ -1203,7 +1203,6 @@ export default {
 "Check group membership": "Groepslidmaatschap controleren",
 "member": "lid",
 "not a member": "geen lid",
-"Verify and change sign-in": "Aanmelding controleren en wijzigen",
 "Checking credentials...": "Aanmeldgegevens controleren...",
 "Authentication": "Authenticatie",
 "Local administrator": "Lokale beheerder",

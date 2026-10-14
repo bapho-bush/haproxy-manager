@@ -1203,7 +1203,6 @@ export default {
 "Check group membership": "Verifica appartenenza al gruppo",
 "member": "membro",
 "not a member": "non membro",
-"Verify and change sign-in": "Verifica e modifica l’accesso",
 "Checking credentials...": "Verifica delle credenziali...",
 "Authentication": "Autenticazione",
 "Local administrator": "Amministratore locale",

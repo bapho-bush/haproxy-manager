@@ -11,6 +11,7 @@ async function renderAuthentication(container){
   card.innerHTML='<div class=hd><h2>'+t("Panel sign-in")+'</h2></div>';
   const bd=document.createElement("div");bd.className="bd";
   const intro=document.createElement("p");intro.className="hint";
+  intro.style.marginBottom="14px";
   intro.textContent=t("PAM admits members of a system group as panel administrators. Users and Groups under SIGN-IN protect published services. Manage system accounts and group membership in the OS. Use HTTPS before entering system passwords.");
   bd.appendChild(intro);
   const fields=[
@@ -40,23 +41,25 @@ async function renderAuthentication(container){
   frm.querySelector("#f_auth_mode").addEventListener("change",sync);sync();
   const status=document.createElement("p");status.className="hint";
   status.textContent=(cur.ready?t("PAM is ready."):(cur.errors||[]).join("; "))+" "+
-    t("Enumerated group members: ")+(cur.members||[]).join(", ")+". "+cur.members_note;
+    t("Enumerated group members: ")+(cur.members||[]).join(", ")+".";
   bd.appendChild(status);
+  const note=document.createElement("p");note.className="hint";
+  note.textContent=cur.members_note;note.style.marginBottom="14px";bd.appendChild(note);
   const lookup=document.createElement("div");lookup.className="frm";
   const [label,cell]=fieldRow({k:"auth_lookup",l:"Username to check",t:"text"},"");
   const user=cell.querySelector("input");lookup.appendChild(label);lookup.appendChild(cell);
   const actions=document.createElement("div");actions.style.marginTop="8px";
-  const result=document.createElement("span");result.className="hint";
+  const result=document.createElement("div");result.className="hint";
   result.setAttribute("role","status");
-  actions.appendChild(btn(t("Check group membership"),"sm",async()=>{
+  actions.appendChild(btn(t("Check group membership"),"",async()=>{
     try{
       const r=await api("ui-auth?username="+encodeURIComponent(user.value.trim()));
       result.textContent=r.lookup.username+": "+(r.lookup.member?t("member"):t("not a member"));
     }catch(e){result.textContent=e.message;}
   }));
   actions.appendChild(result);cell.appendChild(actions);bd.appendChild(lookup);
-  const msg=document.createElement("p");msg.className="hint";msg.setAttribute("role","status");
-  const save=btn(t("Verify and change sign-in"),"pri",async()=>{
+  const msg=document.createElement("div");msg.className="hint";msg.style.marginTop="12px";msg.setAttribute("role","status");
+  const save=btn(t("Save"),"pri",async()=>{
     save.disabled=true;msg.textContent=t("Checking credentials...");
     try{
       await api("ui-auth","PUT",{mode:val("auth_mode"),pam_service:val("pam_service").trim(),allowed_group:val("allowed_group").trim(),
@@ -72,8 +75,8 @@ async function renderAuthentication(container){
       save.disabled=false;
     }
   });
-  save.style.marginTop="16px";
-  bd.appendChild(save);bd.appendChild(msg);card.appendChild(bd);container.appendChild(card);
+  const foot=document.createElement("div");foot.style.marginTop="16px";foot.appendChild(save);
+  bd.appendChild(foot);bd.appendChild(msg);card.appendChild(bd);container.appendChild(card);
 }
 
 /* ---- HTTPS for this UI ---- */

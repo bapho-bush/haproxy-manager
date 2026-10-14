@@ -1203,7 +1203,6 @@ export default {
 "Check group membership": "Kontroller gruppemedlemskap",
 "member": "medlem",
 "not a member": "ikke medlem",
-"Verify and change sign-in": "Kontroller og endre innlogging",
 "Checking credentials...": "Kontrollerer innloggingsopplysninger...",
 "Authentication": "Autentisering",
 "Local administrator": "Lokal administrator",
